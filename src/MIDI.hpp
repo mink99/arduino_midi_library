@@ -53,6 +53,8 @@ inline MidiInterface<SerialPort, Settings>::MidiInterface(SerialPort& inSerial)
     mStopCallback                   = 0;
     mActiveSensingCallback          = 0;
     mSystemResetCallback            = 0;
+	//enhanced Thrufilter	
+	mChannelMessageThruFilterCallback				= 0;
 }
 
 /*! \brief Destructor for MidiInterface.
@@ -979,6 +981,8 @@ template<class SerialPort, class Settings> void MidiInterface<SerialPort, Settin
 template<class SerialPort, class Settings> void MidiInterface<SerialPort, Settings>::setHandleStop(void (*fptr)(void))                                               { mStopCallback                 = fptr; }
 template<class SerialPort, class Settings> void MidiInterface<SerialPort, Settings>::setHandleActiveSensing(void (*fptr)(void))                                      { mActiveSensingCallback        = fptr; }
 template<class SerialPort, class Settings> void MidiInterface<SerialPort, Settings>::setHandleSystemReset(void (*fptr)(void))                                        { mSystemResetCallback          = fptr; }
+// enh Thrufilter
+template<class SerialPort, class Settings> void MidiInterface<SerialPort, Settings>::setChannelMessageThruFilter(bool (*fptr)(MidiType inType,DataByte &inData1,DataByte &inData2,Channel &inChannel))
 
 /*! \brief Detach an external function from the given type.
 
@@ -1012,6 +1016,13 @@ void MidiInterface<SerialPort, Settings>::disconnectCallbackFromType(MidiType in
         default:
             break;
     }
+}
+
+// enh Thrufilter
+template<class SerialPort, class Settings>
+void MidiInterface<SerialPort, Settings>::disconnectChannelMessageThruFilter()
+{
+	mChannelMessageThruFilterCallback           = 0;
 }
 
 /*! @} */ // End of doc group MIDI Callbacks
@@ -1107,6 +1118,51 @@ void MidiInterface<SerialPort, Settings>::turnThruOff()
     mThruFilterMode = Off;
 }
 
+// enhanced filtering : replaces the direct call to send
+
+template<class SerialPort, class Settings>
+inline void MidiInterface<SerialPort, Settings>::checkedSend(MidiType inType,
+              DataByte inData1,
+              DataByte inData2,
+              Channel inChannel)
+{
+	if (mChannelMessageThruFilterCallback != 0)	
+	{
+		if (mChannelMessageThruFilterCallback(inType,inData1,inData2,inChannel))
+			send(inType,inData1,inData2,inChannel);
+	}
+	else
+	{
+		send(inType,inData1,inData2,inChannel);
+	}
+		
+	
+}
+// enhanced filtering : replaces the direct call to send on realtime Messages
+// to avoid having two different callbacks i filled the databytes and the channel with dummy data and routed both calls to the same callback
+// i expect the user to start his callback code with a switch on the midi type
+// 
+
+template<class SerialPort, class Settings>
+inline void MidiInterface<SerialPort, Settings>::checkedSend(MidiType inType)
+{
+    DataByte inData1 = 0xFF;
+    DataByte inData2 = 0xFF;
+	Channel inChannel = 0xFF;
+	
+ 
+	if (mChannelMessageThruFilterCallback != 0)	
+	{
+		if (mChannelMessageThruFilterCallback(inType,inData1,inData2,inChannel))
+			sendRealTime(inType); 
+	}
+	else
+	{
+		sendRealTime(inType); 
+	}
+		
+	
+}
 /*! @} */ // End of doc group MIDI Thru
 
 // This method is called upon reception of a message
@@ -1115,6 +1171,15 @@ void MidiInterface<SerialPort, Settings>::turnThruOff()
 //   to output unless filter is set to Off.
 // - Channel messages are passed to the output whether their channel
 //   is matching the input channel and the filter setting
+// - if an enhanced Filtercallback is set, the following behaviour is applied
+//   if the callback returns false, the message will not be forwarded.
+//   if the callback has modified the parameters Data1, Data2 or channel, the message 
+//   will be forwarded with the modified parameters.
+//   For the handling of the input facilities, like callbacks, the 
+//   modifications are not relevant and discarded
+// - for realtime messages, the same callback is used as for channel messages
+//   the parameters Data1, Data2 & Channel are dummies
+
 template<class SerialPort, class Settings>
 void MidiInterface<SerialPort, Settings>::thruFilter(Channel inChannel)
 {
@@ -1132,7 +1197,7 @@ void MidiInterface<SerialPort, Settings>::thruFilter(Channel inChannel)
         switch (mThruFilterMode)
         {
             case Full:
-                send(mMessage.type,
+                checkedSend(mMessage.type,
                      mMessage.data1,
                      mMessage.data2,
                      mMessage.channel);
@@ -1141,7 +1206,7 @@ void MidiInterface<SerialPort, Settings>::thruFilter(Channel inChannel)
             case SameChannel:
                 if (filter_condition)
                 {
-                    send(mMessage.type,
+                    checkedSend(mMessage.type,
                          mMessage.data1,
                          mMessage.data2,
                          mMessage.channel);
@@ -1151,7 +1216,7 @@ void MidiInterface<SerialPort, Settings>::thruFilter(Channel inChannel)
             case DifferentChannel:
                 if (!filter_condition)
                 {
-                    send(mMessage.type,
+                    checkedSend(mMessage.type,
                          mMessage.data1,
                          mMessage.data2,
                          mMessage.channel);
@@ -1181,7 +1246,8 @@ void MidiInterface<SerialPort, Settings>::thruFilter(Channel inChannel)
             case ActiveSensing:
             case SystemReset:
             case TuneRequest:
-                sendRealTime(mMessage.type);
+                //sendRealTime(mMessage.type); 
+				checkedSend(mMessage.type);
                 break;
 
             case SystemExclusive:

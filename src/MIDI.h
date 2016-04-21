@@ -184,8 +184,21 @@ public:
     inline void turnThruOff();
     inline void setThruFilterMode(MidiFilterMode inThruFilterMode);
 
+// enhanced ThruFilter : set / unset the filter		
+	inline void setChannelMessageThruFilter(bool (*fptr)(MidiType inType,	DataByte &inData1,	DataByte &inData2,	Channel &inChannel));
+	inline void disconnectChannelMessageThruFilter();
+
+
 private:
     void thruFilter(byte inChannel);
+	// the hooks to run the mirroring thrufilter - replace sendXX 
+	// not to interfere with the rest of the lib, these functions do not use references on the parameters, so that, even if the parameters are modified within mirroring, the processing outside mirroring will work
+	// on the original data
+	// @Francois : please check twice that i have not created serious side effects.
+	//
+	inline void checkedSend(MidiType inType,DataByte inData1,DataByte inData2, Channel inChannel);
+	inline void checkedSend(MidiType inType );
+
 
 private:
     bool parse();
@@ -196,6 +209,10 @@ private:
 private:
     bool            mThruActivated  : 1;
     MidiFilterMode  mThruFilterMode : 7;
+
+// enhanced ThruFilter : the callback - Function	
+	bool (*mChannelMessageThruFilterCallback)(	MidiType inType,DataByte &inData1,DataByte &inData2,Channel &inChannel);
+    
 
 private:
     typedef Message<Settings::SysExMaxSize> MidiMessage;
